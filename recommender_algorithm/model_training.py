@@ -60,7 +60,7 @@ def content_based_recommendations(user_input, content_df=content_df, tfidf_matri
     return content_df.iloc[movie_indices]
 
 # Example usage with user's input
-user_input = input()
+user_input = input("Input a movie description: ")
 recommended_movies = content_based_recommendations(user_input)
 
 # Print the recommended movies
