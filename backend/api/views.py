@@ -1,6 +1,6 @@
 import pandas as pd
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import linear_kernel
+import joblib
+from sentence_transformers import SentenceTransformer, util
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 import json
@@ -15,74 +15,53 @@ class CreateUserView(generics.CreateAPIView):
     permission_classes = [AllowAny]
 
 # Load the detailed movies CSV file
-data = pd.read_csv('detailed_movies.csv')
+df = pd.read_csv('detailed_movies.csv')
 
-# Content Based Filtering
-content_df = data[['title', 'genres', 'adult', 'overview', 
-                   'popularity', 'vote_average', 'runtime']]
+# Preprocess the Data
+df['overview'] = df['overview'].fillna('')
+df['genres'] = df['genres'].fillna('')
+df['content'] = df['overview'] + ' ' + df['genres']
 
-# Process genres and create a content-based filtering matrix
-processed_genres = []
+# Load precomputed embeddings
+movie_embeddings = joblib.load('all-mpnet-base-v2_movie_embeddings.pkl')
 
-for genres in content_df['genres']:
-    genre_list = eval(genres)
-    genre_names = ''
-    for genre in genre_list:
-        if genre_names:
-            genre_names += ' '
-        genre_names += genre['name']
-    processed_genres.append(genre_names)
+# Sentence-BERT Model
+model = SentenceTransformer('all-mpnet-base-v2')
 
-content_df['genres'] = processed_genres
-
-content_df['Content'] = content_df.apply(lambda row: ' '.join(row.dropna().astype(str)), axis=1)
-
-tfidf_vectorizer = TfidfVectorizer()
-tfidf_matrix = tfidf_vectorizer.fit_transform(content_df['Content'])
-
-def content_based_recommendations(user_input, content_df=content_df, tfidf_matrix=tfidf_matrix):
-    user_input_tfidf = tfidf_vectorizer.transform([user_input])
-
-    cosine_sim_with_input = linear_kernel(user_input_tfidf, tfidf_matrix)
-
-    sim_scores = list(enumerate(cosine_sim_with_input[0]))
-
-    sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
+def get_hybrid_recommendations(user_input, top_n=5):
+    # Encode user input
+    user_input_embedding = model.encode(user_input, convert_to_tensor=True)
     
-    # TOP 10
-    # sim_scores = sim_scores[:10]
-    # movie_indices = [i[0] for i in sim_scores]
+    # Compute cosine similarity
+    cosine_sim = util.pytorch_cos_sim(user_input_embedding, movie_embeddings)
+    
+    # Get top N recommendations
+    top_indices = cosine_sim.argsort(descending=True).squeeze()[:top_n]
+    
+    # Collaborative Filtering using 'vote_average' and 'vote_count'
+    df['rating_score'] = df['vote_average'] * df['vote_count']
+    df['normalized_rating'] = (df['rating_score'] - df['rating_score'].min()) / (df['rating_score'].max() - df['rating_score'].min())
 
-    # BEST MATCH
-    best_match_index = sim_scores[0][0]
+    # Content-based recommendations
+    content_recommendations = df.iloc[top_indices][['title', 'genres', 'vote_average', 'overview']]
 
-    return content_df.iloc[best_match_index]
+    # Merge with collaborative filtering (normalized rating score)
+    recommendations = content_recommendations.merge(df[['title', 'normalized_rating']], on='title', how='left')
+    
+    # Compute a more refined combined score
+    content_weight = 0.7
+    collaborative_weight = 0.3
+    recommendations['combined_score'] = (
+        content_weight * (recommendations.index / top_n) + 
+        collaborative_weight * recommendations['normalized_rating']
+    )
+    
+    # Rank the combined scores and return the top N movies
+    final_recommendations = recommendations.sort_values(by='combined_score', ascending=False).head(top_n)
+    
+    # Ensure we are returning the necessary columns
+    return final_recommendations[['title', 'genres', 'vote_average', 'overview', 'combined_score']]
 
-# TOP 10 LIST SENDING TO FRONTEND
-# @csrf_exempt
-# def recommend_view(request):
-#     if request.method == 'POST':
-#         try:
-#             # Parse the input from the request
-#             data = json.loads(request.body)
-#             user_input = data.get('text', '')
-
-#             print(f"User input received: {user_input}")  # Debug
-
-#             # Get recommendations
-#             recommended_movies = content_based_recommendations(user_input)
-
-#             print(f"Recommended movies: {recommended_movies[['title', 'genres', 'vote_average', 'overview']]}")  # Debug
-
-#             # Prepare the response data
-#             response_data = recommended_movies[['title', 'genres', 'vote_average', 'overview']].to_dict(orient='records')
-
-#             return JsonResponse({'recommendations': response_data}, status=200)
-#         except Exception as e:
-#             print(f"Error: {str(e)}")  # Debug
-#             return JsonResponse({'error': str(e)}, status=500)
-
-#     return JsonResponse({'error': 'Invalid request method'}, status=400)
 
 @csrf_exempt
 def recommend_view(request):
@@ -93,18 +72,30 @@ def recommend_view(request):
             user_input = data.get('text', '')
 
             print(f"User input received: {user_input}")  # Debug
+            
+            # Get the top recommendations
+            recommended_movies = get_hybrid_recommendations(user_input, top_n=3)  # Get only the top recommendation
 
-            # Get the top recommendation
-            recommended_movie = content_based_recommendations(user_input)
+            # Extract the top recommendation
+            top_movie = recommended_movies.iloc[0]  # Extract the first (and only) recommendation
+            
+            # Parse the genres field to extract only the genre names
+            genre_list = eval(top_movie['genres'])  # Convert the string representation of list to an actual list
+            genre_names = ', '.join([genre['name'] for genre in genre_list])  # Extract the names and join them
 
-            print(f"Recommended movie: {recommended_movie[['title', 'genres', 'vote_average', 'overview']]}")  # Debug
+            second_movie_title = recommended_movies.iloc[1]['title']  # Get the 2nd best movie title
+            third_movie_title = recommended_movies.iloc[2]['title']  # Get the 3rd best movie title
 
-            # Format the response as a few sentences
+
+            # Format the response as a paragraph
             response_text = (
-                f"I recommend you watch '{recommended_movie['title']}'. "
-                f"It's a {recommended_movie['genres']} movie with a rating of {recommended_movie['vote_average']}/10. "
-                f"Here’s a brief overview: {recommended_movie['overview']}"
+                f"I recommend you watch '{top_movie['title']}'. "
+                f"It's a {genre_names} movie with a rating of {top_movie['vote_average']}/10.\n"
+                f"Here’s a brief overview: {top_movie['overview']}\n"
+                f"Other movies you might like are: '{second_movie_title}' and '{third_movie_title}'."
             )
+
+            print(response_text)  # Debug
 
             return JsonResponse({'recommendation': response_text}, status=200)
         except Exception as e:
@@ -112,3 +103,4 @@ def recommend_view(request):
             return JsonResponse({'error': str(e)}, status=500)
 
     return JsonResponse({'error': 'Invalid request method'}, status=400)
+

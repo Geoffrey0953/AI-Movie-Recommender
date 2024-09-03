@@ -36,7 +36,8 @@ six
 surprise          
 sympy              
 threadpoolctl      
-torch              
+torch   
+tqdm           
 typing_extensions  
 tzdata             
 urllib3           

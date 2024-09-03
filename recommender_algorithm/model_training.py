@@ -1,72 +1,69 @@
 import pandas as pd
 import numpy as np
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import linear_kernel
+from sentence_transformers import SentenceTransformer, util
+import joblib  # For saving and loading precomputed embeddings
 
-'''
-NECESSARY INFORMATION: 
-adult, genres, title, overview, popularity, vote_average, runtime
-Ranked in terms of relevancy, highest rated
-Filters: Highest rated, closest match in terms of description, Adult, Horror
-Maybe implement a sublist for that genre recommended
-'''
+# Load the data
+df = pd.read_csv('detailed_movies.csv')
 
-# Load the detailed movies CSV file
-data = pd.read_csv('detailed_movies.csv')
+# Preprocess the Data
+df['overview'] = df['overview'].fillna('')
+df['genres'] = df['genres'].fillna('')
+df['content'] = df['overview'] + ' ' + df['genres']
 
-# Content Based Filtering
-content_df = data[['title', 'genres', 'adult', 'overview', 
-                   'popularity', 'vote_average', 'runtime']]
+# Sentence-BERT Model
+model = SentenceTransformer('all-mpnet-base-v2')
 
-# Initialize an empty list to store the processed genres
-processed_genres = []
+# Precompute and save embeddings (do this once)
+def precompute_embeddings():
+    movie_embeddings = model.encode(df['content'].tolist(), convert_to_tensor=True)
+    joblib.dump(movie_embeddings, 'all-mpnet-base-v2_movie_embeddings.pkl')
 
-# Convert genres (list of dictionaries) to a string
-for genres in content_df['genres']:
-    genre_list = eval(genres)
-    genre_names = ''
-    for genre in genre_list:
-        if genre_names:
-            genre_names += ' '
-        genre_names += genre['name']
-    processed_genres.append(genre_names)
+# Uncomment the line below to run this once to save the embeddings
+# precompute_embeddings()
 
-# Assign the processed genres back to the DataFrame
-content_df.loc[:, 'genres'] = processed_genres
+# Load precomputed embeddings
+movie_embeddings = joblib.load('all-mpnet-base-v2_movie_embeddings.pkl')
 
-# Combine multiple features into a single 'Content' column
-content_df.loc[:, 'Content'] = content_df.apply(lambda row: ' '.join(row.dropna().astype(str)), axis=1)
-
-# Initialize the TFIDF Vectorizer
-tfidf_vectorizer = TfidfVectorizer()
-
-# Fit and transform the 'Content' column
-tfidf_matrix = tfidf_vectorizer.fit_transform(content_df['Content'])
-
-# Function to recommend movies based on user input (Content based)
-def content_based_recommendations(user_input, content_df=content_df, tfidf_matrix=tfidf_matrix):
-    user_input_tfidf = tfidf_vectorizer.transform([user_input])
-
-    cosine_sim_with_input = linear_kernel(user_input_tfidf, tfidf_matrix)
-
-    sim_scores = list(enumerate(cosine_sim_with_input[0]))
-
-    sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
+def get_content_based_recommendations(user_input, top_n=5):
+    # Encode user input
+    user_input_embedding = model.encode(user_input, convert_to_tensor=True)
     
-    sim_scores = sim_scores[:10]
+    # Compute cosine similarity
+    cosine_sim = util.pytorch_cos_sim(user_input_embedding, movie_embeddings)
     
-    movie_indices = [i[0] for i in sim_scores]
+    # Get top N recommendations
+    top_indices = cosine_sim.argsort(descending=True).squeeze()[:top_n]
     
-    return content_df.iloc[movie_indices]
+    return df.iloc[top_indices][['title']]
 
-# Example usage with user's input
-user_input = input("Input a movie description: ")
-recommended_movies = content_based_recommendations(user_input)
+# Collaborative Filtering using 'vote_average' and 'vote_count'
+df['rating_score'] = df['vote_average'] * df['vote_count']
+df['normalized_rating'] = (df['rating_score'] - df['rating_score'].min()) / (df['rating_score'].max() - df['rating_score'].min())
 
-# Print the recommended movies
-print(recommended_movies[['title', 'genres', 'vote_average', 'overview']])
+def get_hybrid_recommendations(user_input, top_n=5):
+    # Content-based recommendations
+    content_recommendations = get_content_based_recommendations(user_input, top_n)
+    
+    # Merge with collaborative filtering (normalized rating score)
+    recommendations = content_recommendations.merge(df[['title', 'normalized_rating']], on='title', how='left')
+    
+    # Compute a more refined combined score
+    content_weight = 0.7
+    collaborative_weight = 0.3
+    recommendations['combined_score'] = (
+        content_weight * (recommendations.index / top_n) + 
+        collaborative_weight * recommendations['normalized_rating']
+    )
+    
+    # Rank the combined scores and return the top N movies
+    final_recommendations = recommendations.sort_values(by='combined_score', ascending=False).head(top_n)
+    
+    return final_recommendations[['title', 'combined_score']]
 
+# Generate Recommendations
+user_input = input("Enter Movie Descriptions: ")
+recommendations = get_hybrid_recommendations(user_input, top_n=5)
 
-# Implement Collaborative Filtering
-# Hybrid recommender system with Content based and Collaborative 
-# For Content Based Filtering, do not include title when looking for movies. Use purely the overview. 
+print("Top Recommendations with Combined Scores:")
+print(recommendations)
