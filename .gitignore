@@ -1,2 +1,8 @@
 api_key.env
-backend/backend/.env
+backend/.env
+installed_packages.txt
+required_before
+backend/db.sqlite3
+backend/.slugignore
+backend/requirements.txt
+backend/runtime.txt
