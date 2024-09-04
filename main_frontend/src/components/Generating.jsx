@@ -1,5 +1,5 @@
 import { useState } from "react";
-import api from "../api"; // Assuming `api` is a configured Axios instance
+import api from "../api";
 
 const Generating = ({ className, onSubmit }) => {
   const [inputValue, setInputValue] = useState("");
@@ -34,6 +34,7 @@ const Generating = ({ className, onSubmit }) => {
           className="w-full h-full bg-transparent border-none text-white outline-none"
           type="text"
           placeholder="Enter movie description here"
+          id="textbox"
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value)} // Update the state on typing
         />

@@ -34,7 +34,7 @@ PAGE WHERE THEY CAN START INPUTTING DESCRIPTIONS */}
             <p className="body-1 max-w-3xl mx-auto mb-6 text-n-2 lg:mb-8">Unleash the power of Ai within Filmbert. Upgrade your movie scene with
               the open AI movie recommendation system
             </p>
-            <Button href="/pricing" white>
+            <Button href="#textbox" white>
               Get Started
             </Button>
         </div>
