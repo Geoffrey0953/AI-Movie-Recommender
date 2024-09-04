@@ -3,14 +3,17 @@ certifi==2024.7.4
 charset-normalizer==3.3.2
 contourpy==1.2.1
 cycler==0.12.1
+dj-database-url==2.2.0
 Django==5.1
 django-cors-headers==4.4.0
+django-heroku==0.3.1
 djangorestframework==3.15.2
 djangorestframework-simplejwt==5.3.1
 faiss-cpu==1.8.0.post1
 filelock==3.15.4
 fonttools==4.53.1
 fsspec==2024.6.1
+gunicorn==23.0.0
 huggingface-hub==0.24.6
 idna==3.7
 Jinja2==3.1.4
@@ -24,6 +27,8 @@ numpy==1.26.4
 packaging==24.1
 pandas==2.2.2
 pillow==10.4.0
+psycopg2==2.9.9
+psycopg2-binary==2.9.9
 PyJWT==2.9.0
 pyparsing==3.1.2
 python-dateutil==2.9.0.post0
@@ -49,4 +54,4 @@ transformers==4.44.2
 typing_extensions==4.12.2
 tzdata==2024.1
 urllib3==2.2.2
-gunicorn
+whitenoise==6.7.0
